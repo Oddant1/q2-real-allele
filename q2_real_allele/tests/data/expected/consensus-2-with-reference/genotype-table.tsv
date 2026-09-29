@@ -1,0 +1,6 @@
+sample-id	read-count-1	allele-1	read-count-2	allele-2
+#q2:types	numeric	categorical	numeric	categorical
+sample-11_S1	500	A2	400	A6
+sample-12_S2	100	A6	90	A7
+sample-13_S3	70	A5	70	A5
+sample-14_S4	30	A1	30	A1

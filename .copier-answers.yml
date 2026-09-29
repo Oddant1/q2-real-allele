@@ -1,0 +1,19 @@
+# !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+# Changes here will be overwritten by Copier
+# NEVER EDIT MANUALLY
+# INSTEAD: run a recopy or update command
+# !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+_commit: 317d2fb
+_src_path: https://github.com/caporaso-lab/plugin-template
+author_email: rachis@caplab.dev
+author_name: Oddant1
+license: skip-license
+module_name: q2_real_allele
+package_name: q2-real-allele
+plugin_description: Call alleles and genotypes from per-sample consensus amplicon
+    sequences using the Real Allele algorithm.
+plugin_name: real-allele
+plugin_short_description: Allele and genotype calling from consensus sequences.
+project_url: https://example.com
+target_distro: tiny

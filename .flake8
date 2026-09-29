@@ -1,0 +1,6 @@
+[flake8]
+# The standalone Real_Allele scripts predate the plugin and are kept as-is.
+extend-exclude =
+    allele_driverV5.py,
+    Rare_Allele_Pipeline.py,
+    Real_Allele_Pipeline.py

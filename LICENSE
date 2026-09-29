@@ -1,0 +1,6 @@
+No license has been chosen for q2-real-allele yet.
+
+The allele-calling algorithm in this package is adapted from the Real_Allele
+scripts (Real_AlleleV11) written by Jason Sahl and Grant Pemberton. Confirm
+the licensing terms of that code with its authors before choosing a license
+for, or distributing, this package.
