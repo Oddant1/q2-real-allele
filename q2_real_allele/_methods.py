@@ -6,8 +6,8 @@
 # See the LICENSE file distributed with this software.
 # ----------------------------------------------------------------------------
 
-"""Allele calling adapted from Real_AlleleV11 by Jason Sahl and Grant
-Pemberton.
+"""Allele calling adapted from Real_AlleleV11 and Rare_Allele by Jason Sahl
+and Grant Pemberton.
 
 Sequence IDs are expected to look like ``<sample>_<read count>``: everything
 before the last underscore identifies the sample, and the final field is the
@@ -39,17 +39,19 @@ def call_alleles(sequences: pd.Series,
                  reference_alleles: pd.Series = None,
                  table: pd.DataFrame = None,
                  min_coverage: int = 10,
-                 proportion: float = 0.5) -> (pd.Series,
-                                              pd.Series,
-                                              rachis.Metadata,
-                                              rachis.Metadata,
-                                              rachis.Metadata):
+                 proportion: float = 0.5,
+                 keep_rare_alleles: bool = False) -> (pd.Series,
+                                                      pd.Series,
+                                                      rachis.Metadata,
+                                                      rachis.Metadata,
+                                                      rachis.Metadata):
     if table is None:
         records = _parse_records(sequences)
     else:
         records = _records_from_table(table, sequences)
     passing = _filter_by_proportion(
-        _filter_by_coverage(records, min_coverage), proportion)
+        _filter_by_coverage(records, min_coverage), proportion,
+        keep_rare_alleles)
     if not passing:
         raise ValueError(
             'None of the %d consensus sequences has at least %d reads '
@@ -71,7 +73,7 @@ def call_alleles(sequences: pd.Series,
     genotyped_sequences = pd.Series(
         {'%s_%s' % (record.id, names[record.sequence]): record.sequence
          for record in passing})
-    genotypes = _tabulate_genotypes(passing, names)
+    genotypes = _tabulate_genotypes(passing, names, keep_rare_alleles)
     allele_frequencies = pd.DataFrame(
         {'frequency': [count for _, count in frequencies]},
         index=pd.Index([names[sequence] for sequence, _ in frequencies],
@@ -129,21 +131,26 @@ def _filter_by_coverage(records, min_coverage):
     return [record for record in records if record.read_count >= min_coverage]
 
 
-def _filter_by_proportion(records, proportion):
+def _filter_by_proportion(records, proportion, keep_rare_alleles):
     by_sample = {}
     for record in records:
         by_sample.setdefault(record.sample, []).append(record)
 
-    # Keep each sample's most abundant sequence, plus the runner-up when it
-    # has at least `proportion` as many reads. Any others are discarded.
+    # Keep each sample's most abundant sequence, plus any other with at least
+    # `proportion` as many reads. Real_AlleleV11 only considers the
+    # runner-up and discards the rest, while Rare_Allele considers them all.
     passing = []
     for sample_records in by_sample.values():
         top, *others = sorted(sample_records,
                               key=lambda record: record.read_count,
                               reverse=True)
+        if not keep_rare_alleles:
+            others = others[:1]
         passing.append(top)
-        if others and others[0].read_count / top.read_count >= proportion:
-            passing.append(others[0])
+        passing.extend(
+            record for record in others
+            if record.read_count / top.read_count >= proportion
+        )
     return passing
 
 
@@ -201,30 +208,42 @@ def _assign_allele_names(frequencies, known):
     return names
 
 
-def _tabulate_genotypes(records, names):
+def _tabulate_genotypes(records, names, keep_rare_alleles):
     by_sample = {}
     for record in records:
         by_sample.setdefault(record.sample, []).append(record)
 
-    rows = []
+    genotypes = {}
     for sample, sample_records in by_sample.items():
-        first, *second = sorted(sample_records,
-                                key=lambda record: record.read_count,
-                                reverse=True)
+        ranked = sorted(sample_records,
+                        key=lambda record: record.read_count,
+                        reverse=True)
         # As in Real_AlleleV11, homozygotes list their only allele twice.
-        second = second[0] if second else first
-        rows.append((sample,
-                     first.read_count, names[first.sequence],
-                     second.read_count, names[second.sequence]))
+        # Rare_Allele lists each of a sample's alleles once.
+        if not keep_rare_alleles and len(ranked) == 1:
+            ranked *= 2
+        genotype = {}
+        for rank, record in enumerate(ranked, start=1):
+            genotype[f'read-count-{rank}'] = record.read_count
+            genotype[f'allele-{rank}'] = names[record.sequence]
+        genotypes[sample] = genotype
 
-    return pd.DataFrame(
-        rows, columns=['sample-id', 'read-count-1', 'allele-1',
-                       'read-count-2', 'allele-2']).set_index('sample-id')
+    # A sample with fewer alleles than the most in any sample has no value
+    # in the columns of the alleles it lacks.
+    width = max(len(genotype) for genotype in genotypes.values()) // 2
+    columns = [f'{field}-{rank}' for rank in range(1, width + 1)
+               for field in ('read-count', 'allele')]
+    genotypes = pd.DataFrame.from_dict(genotypes, orient='index')
+    genotypes = genotypes.reindex(columns=columns)
+    genotypes.index.name = 'sample-id'
+    return genotypes
 
 
 def _summarize_zygosity(genotypes):
     total = len(genotypes)
-    heterozygous = int((genotypes['allele-1'] != genotypes['allele-2']).sum())
+    # A sample is heterozygous when it has more than one distinct allele.
+    alleles = genotypes.filter(regex=r'^allele-')
+    heterozygous = int((alleles.nunique(axis=1) > 1).sum())
     counts = [total - heterozygous, heterozygous]
     return pd.DataFrame(
         {'sample-count': counts,

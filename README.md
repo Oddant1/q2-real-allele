@@ -142,6 +142,23 @@ qiime real-allele call-alleles \
 
 `--p-min-coverage` (default 10) and `--p-proportion` (default 0.5) are the `-c` and `-p` options of `Real_AlleleV11`.
 
+### Keeping rare alleles
+
+`Real_AlleleV11` keeps at most two sequences per sample: the most abundant, and the second most abundant if it has at least `--p-proportion` as many reads.
+Pass `--p-keep-rare-alleles` to call alleles as `Rare_Allele` does instead, keeping every sequence with at least `--p-proportion` as many reads as the sample's most abundant, so that a sample can have any number of alleles:
+
+```shell
+qiime real-allele call-alleles \
+  --i-sequences TEST_V1.qza \
+  --p-keep-rare-alleles \
+  --output-dir TEST_V1-rare-results
+```
+
+A sample's two most abundant alleles are the ones `Real_AlleleV11` would have called, and any after them are its rare alleles.
+The genotype table gets a read count and allele column for each, `read-count-3` and `allele-3` onwards, with as many as the sample with the most alleles needs.
+As in `Rare_Allele`, each allele is listed once, so a homozygous sample has values only in `read-count-1` and `allele-1`, and a sample with fewer alleles than another has no value in the columns it lacks.
+In the heterozygosity summary, a sample with more than one allele counts as heterozygous.
+
 ### Giving read counts in a feature table
 
 Instead of encoding read counts in the sequence IDs, you can pass a `FeatureTable[Frequency]` with `--i-table`.

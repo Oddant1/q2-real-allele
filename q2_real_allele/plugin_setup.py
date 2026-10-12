@@ -6,7 +6,7 @@
 # See the LICENSE file distributed with this software.
 # ----------------------------------------------------------------------------
 
-from rachis.plugin import Citations, Float, Int, Plugin, Range
+from rachis.plugin import Bool, Citations, Float, Int, Plugin, Range
 from q2_types.feature_data import FeatureData, Sequence
 from q2_types.feature_table import FeatureTable, Frequency
 from q2_types.metadata import ImmutableMetadata
@@ -35,7 +35,8 @@ plugin.methods.register_function(
             'reference_alleles': FeatureData[Sequence],
             'table': FeatureTable[Frequency]},
     parameters={'min_coverage': Int % Range(1, None),
-                'proportion': Float % Range(0, 1, inclusive_end=True)},
+                'proportion': Float % Range(0, 1, inclusive_end=True),
+                'keep_rare_alleles': Bool},
     outputs=[('alleles', FeatureData[Sequence]),
              ('genotyped_sequences', FeatureData[Sequence]),
              ('genotype_table', ImmutableMetadata),
@@ -68,11 +69,18 @@ plugin.methods.register_function(
             'Consensus sequences supported by fewer reads than this are '
             'discarded.'),
         'proportion': (
-            'Only the two most abundant consensus sequences of each sample '
-            'are considered. The second is kept, making the sample '
-            'heterozygous, if its read count is at least this proportion of '
-            'the first\'s; otherwise the sample is homozygous for the most '
-            'abundant sequence.')
+            'Each sample keeps its most abundant consensus sequence, and any '
+            'other whose read count is at least this proportion of the most '
+            'abundant\'s. Unless `keep_rare_alleles` is set, only the second '
+            'most abundant sequence is considered: the sample is heterozygous '
+            'if it is kept, and otherwise homozygous for the most abundant '
+            'sequence.'),
+        'keep_rare_alleles': (
+            'Consider every consensus sequence of each sample against '
+            '`proportion`, rather than only the two most abundant, as '
+            'Rare_Allele does, so that a sample can have any number of '
+            'alleles. The alleles after a sample\'s two most abundant are '
+            'its rare alleles.')
     },
     output_descriptions={
         'alleles': (
@@ -86,21 +94,26 @@ plugin.methods.register_function(
             'count>_A1).'),
         'genotype_table': (
             'The genotype of each sample: the read count and allele of its '
-            'most abundant (1) and second (2) consensus sequence. '
-            'Homozygous samples list the same read count and allele twice.'),
+            'most abundant (1) and second (2) consensus sequence, and with '
+            '`keep_rare_alleles`, of any others (3, 4, ...) in order of '
+            'decreasing read count. Without `keep_rare_alleles`, homozygous '
+            'samples list the same read count and allele twice. With it, '
+            'each allele is listed once, and a sample with fewer alleles '
+            'than another has no value in the columns it lacks.'),
         'allele_frequencies': (
             'The number of retained consensus sequences carrying each allele '
             'observed in this run.'),
         'heterozygosity': (
-            'The number and percentage of samples that are homozygous and '
-            'heterozygous.')
+            'The number and percentage of samples that are homozygous (one '
+            'allele) and heterozygous (more than one allele).')
     },
     name='Call alleles and genotypes',
     description=(
         'Call alleles and genotypes from per-sample consensus sequences '
         'using the Real Allele algorithm. Sequences below `min_coverage` '
         'reads are discarded, each sample keeps at most two sequences '
-        '(subject to `proportion`), and identical sequences are grouped '
+        '(subject to `proportion`), or any number with `keep_rare_alleles` '
+        'as in Rare_Allele, and identical sequences are grouped '
         'into alleles numbered by decreasing frequency (A1 is the most '
         'common). Provide `reference_alleles` to name alleles consistently '
         'across runs. Read counts come from the sequence IDs, or from '

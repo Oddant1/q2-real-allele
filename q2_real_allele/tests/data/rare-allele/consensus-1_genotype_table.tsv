@@ -1,0 +1,8 @@
+Name of the sequence	Read count 1	Assigned allele 1	Read count 2	Assigned allele 2	Read count 3	Assigned allele 3
+sample-01_S1	120	A1				
+sample-02_S2	200	A1	150	A2		
+sample-04_S4	100	A1	80	A2	70	A3
+sample-05_S5	40	A2				
+sample-08_S8	50	A3	45	A4		
+sample-07_S7	60	A5				
+sample-03_S3	300	A1				

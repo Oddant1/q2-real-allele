@@ -133,6 +133,32 @@ class CallAllelesTests(RealAlleleTestCase):
         self.assertEqual(
             list(zygosity.to_dataframe()['sample-count']), [3, 4])
 
+    def test_keep_rare_alleles(self):
+        _, genotyped, genotypes, _, zygosity = call_alleles(
+            self.load_sequences('consensus-1.fasta'), keep_rare_alleles=True)
+
+        genotypes = genotypes.to_dataframe()
+        # sample-04's third sequence has 0.7 of the first's reads, and
+        # sample-01 has only one allele, which is listed once.
+        self.assertEqual(list(genotypes.loc['sample-04_S4']),
+                         [100, 'A1', 80, 'A2', 70, 'A3'])
+        self.assertEqual(list(genotypes.loc['sample-01_S1'].dropna()),
+                         [120, 'A1'])
+        self.assertIn('sample-04_S4_70_A3', genotyped.index)
+        self.assertEqual(
+            list(zygosity.to_dataframe()['sample-count']), [4, 3])
+
+    def test_keep_rare_alleles_without_heterozygotes(self):
+        # No sample has two sequences with the same read count.
+        _, _, genotypes, _, zygosity = call_alleles(
+            self.load_sequences('consensus-1.fasta'), proportion=1,
+            keep_rare_alleles=True)
+
+        self.assertEqual(list(genotypes.to_dataframe().columns),
+                         ['read-count-1', 'allele-1'])
+        self.assertEqual(
+            list(zygosity.to_dataframe()['sample-count']), [7, 0])
+
     def test_malformed_ids(self):
         with self.assertRaisesRegex(
                 ValueError, r"<sample>_<read count>.*'sample-02_S2_many', "
@@ -212,6 +238,26 @@ class CallAllelesFromTableTests(RealAlleleTestCase):
         self.assertEqual(genotypes.to_dataframe().values.tolist(),
                          [[500, 'A1', 500, 'A2'], [1000, 'A1', 500, 'A2']])
 
+    def test_keep_rare_alleles_keeps_sequences_sharing_a_read_count(self):
+        sequences = pd.Series(
+            {'f1': 'ACGTACGT', 'f2': 'TTGTACGT', 'f3': 'ACGAACGT'})
+        table = pd.DataFrame(
+            {'f1': [500, 1000], 'f2': [500, 500], 'f3': [0, 500]},
+            index=['sample-a', 'sample-b'])
+
+        _, genotyped, _, _, _ = call_alleles(sequences, table=table,
+                                             keep_rare_alleles=True)
+
+        # sample-b keeps both f2 and f3, although both have the ID
+        # sample-b_500.
+        self.assertEqual({id_: str(seq) for id_, seq in genotyped.items()}, {
+            'sample-a_500_A1': 'ACGTACGT',
+            'sample-a_500_A2': 'TTGTACGT',
+            'sample-b_1000_A1': 'ACGTACGT',
+            'sample-b_500_A2': 'TTGTACGT',
+            'sample-b_500_A3': 'ACGAACGT',
+        })
+
     def test_table_features_must_be_sequences(self):
         with self.assertRaisesRegex(
                 ValueError, "must be one of the sequences.*'f2'"):
@@ -275,6 +321,68 @@ class RealAlleleV11RegressionTests(RealAlleleTestCase):
                     [len(exp_genotypes) - heterozygous, heterozygous])
 
 
+class RareAlleleRegressionTests(RealAlleleTestCase):
+    """Compare with Rare_Allele run on consensus-1.fasta, TEST_V1.fasta and
+    TEST_V2.fasta.
+
+    Of these, only consensus-1.fasta has a sample with more than two
+    sequences that pass the proportion filter. Rare_Allele's other outputs
+    for TEST_V1.fasta and TEST_V2.fasta are therefore the same as
+    Real_AlleleV11's, so only its genotype tables are kept for those.
+    """
+
+    def read_rare_table(self, filename, **kwargs):
+        return pd.read_csv(self.get_data_path(f'rare-allele/{filename}'),
+                           sep='\t', **kwargs)
+
+    def assertGenotypeTableMatches(self, genotypes, filename):
+        expected = self.read_rare_table(filename, index_col=0)
+        genotypes = genotypes.to_dataframe()
+
+        # Rare_Allele leaves the columns of the alleles a sample lacks empty.
+        def cells(frame):
+            return [['' if pd.isna(value) else value for value in row]
+                    for row in frame.itertuples(index=False)]
+
+        self.assertEqual(list(genotypes.index), list(expected.index))
+        self.assertEqual(len(genotypes.columns), len(expected.columns))
+        self.assertEqual(cells(genotypes), cells(expected))
+
+    def test_matches_rare_allele(self):
+        alleles, genotyped, genotypes, frequencies, _ = call_alleles(
+            self.load_sequences('consensus-1.fasta'), keep_rare_alleles=True)
+
+        exp_alleles = self.read_rare_table('consensus-1_alleles.tsv',
+                                           header=None)
+        self.assertEqual(
+            [(str(seq), id_) for id_, seq in alleles.items()],
+            list(exp_alleles.itertuples(index=False, name=None)))
+
+        exp_frequencies = self.read_rare_table('consensus-1_frequency.tsv',
+                                               header=None)
+        frequencies = frequencies.to_dataframe()['frequency']
+        self.assertEqual(
+            [(str(alleles[id_]), count) for id_, count in frequencies.items()],
+            list(exp_frequencies.itertuples(index=False, name=None)))
+
+        self.assertSequencesEqual(
+            genotyped,
+            self.load_sequences('rare-allele/consensus-1.genotyped.fasta'))
+
+        self.assertGenotypeTableMatches(genotypes,
+                                        'consensus-1_genotype_table.tsv')
+
+    def test_genotype_tables_match_rare_allele(self):
+        for name in 'TEST_V1', 'TEST_V2':
+            with self.subTest(name):
+                _, _, genotypes, _, _ = call_alleles(
+                    self.load_sequences(f'real-allele-v11/{name}.fasta'),
+                    keep_rare_alleles=True)
+
+                self.assertGenotypeTableMatches(genotypes,
+                                                f'{name}_genotype_table.tsv')
+
+
 class CallAllelesActionTests(RealAlleleTestCase):
     def test_action_with_reference_from_previous_run(self):
         call = self.plugin.methods['call_alleles']
@@ -308,6 +416,21 @@ class CallAllelesActionTests(RealAlleleTestCase):
         self.assertMetadataEqual(
             results.allele_frequencies.view(rachis.Metadata),
             'expected/consensus-1/allele-frequencies.tsv')
+
+    def test_action_keeping_rare_alleles(self):
+        call = self.plugin.methods['call_alleles']
+
+        results = call(sequences=self.import_sequences('consensus-1.fasta'),
+                       keep_rare_alleles=True)
+
+        genotypes = results.genotype_table.view(rachis.Metadata)
+        genotypes = genotypes.to_dataframe()
+        self.assertEqual(list(genotypes.columns),
+                         ['read-count-1', 'allele-1', 'read-count-2',
+                          'allele-2', 'read-count-3', 'allele-3'])
+        self.assertEqual(list(genotypes.loc['sample-04_S4']),
+                         [100, 'A1', 80, 'A2', 70, 'A3'])
+        self.assertTrue(genotypes.loc['sample-01_S1'].iloc[2:].isna().all())
 
     def test_parameters_out_of_range(self):
         call = self.plugin.methods['call_alleles']
